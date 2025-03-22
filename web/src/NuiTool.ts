@@ -1,13 +1,30 @@
+import { NUIAction } from "./NUIAction";
+
 const getParentResourceName = (window as any).GetParentResourceName || function () {
     return null;
 };
 
 const scriptName = getParentResourceName();
-const isOnFiveM = scriptName != null;
+export const isOnFiveM = scriptName != null;
 
-export async function TriggerNuiCallback(methodName: string, dataToSend: object = {}) {
+const registerNUICallbackList = new Map<string, Function>();
+export function RegisterNUICallbackFake(eventName: string, callback: Function) {
+    registerNUICallbackList.set(eventName, callback)
+}
+
+export async function TriggerNUICallback(eventName: string, dataToSend: object = {}) {
     if (isOnFiveM == false) {
-        return;
+        const callback = registerNUICallbackList.get(eventName);
+        if (callback == null) return null;
+
+        const task = new Promise(async (resolve) => {
+            let result: any = null;
+            await callback?.(dataToSend, (resultFromCallback: any) => {
+                result = resultFromCallback;
+            });
+            resolve(result);
+        });
+        return await task;
     }
 
     try {
@@ -19,24 +36,30 @@ export async function TriggerNuiCallback(methodName: string, dataToSend: object 
             body: JSON.stringify(dataToSend),
         };
 
-        const resp = await fetch(`https://${scriptName}/${methodName}`, options);
-        await resp.json();
+        const response = await fetch(`https://${scriptName}/${eventName}`, options);
+        return await response.json();
     } catch (err) {
+
     }
 }
-export {
-    isOnFiveM,
+
+export function SendNUIMessageFake(data: any) {
+    postMessage({
+        ...data
+    })
 }
 
-export function ResolvePublicPath(img: string) {
-    return import.meta.env.BASE_URL + img;
+// NUI Action Tool
+const nuiActionCallbackMap = new Map<NUIAction, Function>();
+export function RegisterNUIAction(action: NUIAction, callback: Function) {
+    nuiActionCallbackMap.set(action, callback)
 }
-export function Delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-export function RandomRange(min: number, max: number) {
-    return min + (Math.random() * (max - min));
-}
-export function RandomRangeInt(min: number, max: number) { // min and max included 
-    return Math.floor(Math.random() * (max - min + 1) + min);
-}
+
+window.onmessage = (msg: MessageEvent) => {
+    const data = msg.data;
+    const action = data.action as NUIAction;
+    const callback = nuiActionCallbackMap.get(action)
+    if (callback) {
+        callback(data);
+    }
+};
